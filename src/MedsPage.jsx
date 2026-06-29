@@ -7,8 +7,52 @@ const statusStyle = {
   late:   { background: '#fffbeb', color: '#d97706', label: 'Late' },
 }
 
-// Counts consecutive "taken" days ending today (or yesterday if today isn't taken yet).
-// dates: array of YYYY-MM-DD strings, any order.
+const btnColors = {
+  taken:   { color: '#16a34a', border: '#bbf7d0', activeBg: '#f0fdf4' },
+  skipped: { color: '#dc2626', border: '#fecaca', activeBg: '#fef2f2' },
+}
+
+// Parses "8-9am", "8:30–9:30am", "8am-9pm" into { start: Date, end: Date } for today.
+// Returns null if the string can't be understood — callers treat null as "no window."
+function parseTimeWindow(windowStr) {
+  if (!windowStr) return null
+  const norm = windowStr.replace(/[–—]/g, '-').trim().toLowerCase()
+  const m = norm.match(
+    /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*-\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/
+  )
+  if (!m) return null
+
+  let [, sh, sm = '0', smer, eh, em = '0', emer] = m
+  sh = parseInt(sh); eh = parseInt(eh)
+  sm = parseInt(sm); em = parseInt(em)
+
+  // If only one side has am/pm, inherit it to the other ("8-9am" → both am).
+  if (!smer && emer) smer = emer
+  if (!emer && smer) emer = smer
+  if (!smer) smer = 'am'
+  if (!emer) emer = 'am'
+
+  // Convert to 24-hour.
+  if (smer === 'pm' && sh !== 12) sh += 12
+  if (smer === 'am' && sh === 12) sh = 0
+  if (emer === 'pm' && eh !== 12) eh += 12
+  if (emer === 'am' && eh === 12) eh = 0
+
+  const now = new Date()
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), sh, sm, 0)
+  const end   = new Date(now.getFullYear(), now.getMonth(), now.getDate(), eh, em, 0)
+  return { start, end }
+}
+
+// Decides 'taken' vs 'late' by comparing the timestamp to the window end.
+// Falls back to 'taken' if the window string can't be parsed.
+function deriveStatus(takenAt, timeWindow) {
+  const win = parseTimeWindow(timeWindow)
+  if (!win) return 'taken'
+  return new Date(takenAt) <= win.end ? 'taken' : 'late'
+}
+
+// Counts consecutive days with status taken OR late, ending today (or yesterday).
 function computeStreak(dates) {
   if (dates.length === 0) return 0
   const dateSet = new Set(dates)
@@ -19,7 +63,6 @@ function computeStreak(dates) {
   yesterdayD.setDate(yesterdayD.getDate() - 1)
   const yesterdayStr = yesterdayD.toLocaleDateString('en-CA')
 
-  // Start counting from today if taken, otherwise from yesterday (preserves streak overnight).
   let cursor = dateSet.has(todayStr) ? todayStr : dateSet.has(yesterdayStr) ? yesterdayStr : null
   if (!cursor) return 0
 
@@ -31,13 +74,6 @@ function computeStreak(dates) {
     cursor = d.toLocaleDateString('en-CA')
   }
   return streak
-}
-
-// Base and active colours for each log button.
-const btnColors = {
-  taken:   { color: '#16a34a', border: '#bbf7d0', activeBg: '#f0fdf4' },
-  skipped: { color: '#dc2626', border: '#fecaca', activeBg: '#fef2f2' },
-  late:    { color: '#d97706', border: '#fde68a', activeBg: '#fffbeb' },
 }
 
 export default function MedsPage() {
@@ -53,10 +89,10 @@ export default function MedsPage() {
   const [meds, setMeds] = useState([])
   const [loadingMeds, setLoadingMeds] = useState(true)
   const [logsToday, setLogsToday] = useState({})
-  const [loggingId, setLoggingId] = useState(null) // med.id currently being saved
-  const [streaks, setStreaks] = useState({})         // med.id → streak count
+  const [loggingId, setLoggingId] = useState(null)
+  const [streaks, setStreaks] = useState({})
 
-  const today = new Date().toLocaleDateString('en-CA') // YYYY-MM-DD
+  const today = new Date().toLocaleDateString('en-CA')
 
   async function loadMeds() {
     const { data, error } = await supabase
@@ -65,13 +101,12 @@ export default function MedsPage() {
     setLoadingMeds(false)
   }
 
-  // One query fetches every taken log for all meds — no per-med queries.
-  // We group by med_id client-side, then run computeStreak on each group.
   async function loadStreaks() {
+    // Count taken AND late — both mean you actually took the med.
     const { data, error } = await supabase
       .from('med_logs')
       .select('med_id, date')
-      .eq('status', 'taken')
+      .in('status', ['taken', 'late'])
 
     if (!error) {
       const byMed = {}
@@ -107,18 +142,18 @@ export default function MedsPage() {
     setSubmitting(false)
   }
 
-  // Insert or update today's log for this med.
-  // If a row already exists (logsToday has it), update it — avoids duplicates.
-  // taken_at is only set when the status is 'taken'; otherwise cleared.
-  async function handleLog(med, status) {
+  async function handleLog(med, action) {
     setLoggingId(med.id)
-
     const existing = logsToday[med.id]
-    const payload = {
-      med_id: med.id,
-      date: today,
-      status,
-      taken_at: status === 'taken' ? new Date().toISOString() : null,
+
+    let payload
+    if (action === 'skipped') {
+      payload = { med_id: med.id, date: today, status: 'skipped', taken_at: null }
+    } else {
+      // Stamp current time, then let the window decide whether it's on time or late.
+      const takenAt = new Date().toISOString()
+      const status  = deriveStatus(takenAt, med.time_window)
+      payload = { med_id: med.id, date: today, status, taken_at: takenAt }
     }
 
     if (existing) {
@@ -128,7 +163,7 @@ export default function MedsPage() {
     }
 
     await loadLogsToday()
-    await loadStreaks() // recompute after every log so the number updates live
+    await loadStreaks()
     setLoggingId(null)
   }
 
@@ -175,24 +210,25 @@ export default function MedsPage() {
           )}
 
           {meds.map(med => {
-            const log = logsToday[med.id]
-            const st = log ? statusStyle[log.status] : null
+            const log      = logsToday[med.id]
+            const st       = log ? statusStyle[log.status] : null
             const isLogging = loggingId === med.id
-            const streak = streaks[med.id] || 0
+            const streak   = streaks[med.id] || 0
+            // Taken button lights up whether the derived status was 'taken' or 'late' —
+            // both mean the user pressed Taken.
+            const takenActive   = log?.status === 'taken' || log?.status === 'late'
+            const skippedActive = log?.status === 'skipped'
 
             return (
               <div key={med.id} style={s.medRow}>
 
-                {/* Top line: name + status */}
                 <div style={s.medTop}>
                   <div>
                     <span style={s.medName}>{med.name}</span>
                     {med.dose && <span style={s.medDetail}> · {med.dose}</span>}
                   </div>
                   <div style={s.medRight}>
-                    {streak > 0 && (
-                      <span style={s.streak}>🔥 {streak}</span>
-                    )}
+                    {streak > 0 && <span style={s.streak}>🔥 {streak}</span>}
                     {st ? (
                       <span style={{ ...s.statusBadge, background: st.background, color: st.color }}>
                         {st.label}
@@ -204,29 +240,35 @@ export default function MedsPage() {
                   </div>
                 </div>
 
-                {/* Bottom line: log buttons */}
                 <div style={s.logBtns}>
-                  {['taken', 'skipped', 'late'].map(status => {
-                    const c = btnColors[status]
-                    const isActive = log?.status === status
-                    return (
-                      <button
-                        key={status}
-                        onClick={() => handleLog(med, status)}
-                        disabled={isLogging}
-                        style={{
-                          ...s.logBtn,
-                          color: c.color,
-                          borderColor: c.border,
-                          background: isActive ? c.activeBg : '#fff',
-                          fontWeight: isActive ? '700' : '500',
-                          opacity: isLogging ? 0.5 : 1,
-                        }}
-                      >
-                        {status.charAt(0).toUpperCase() + status.slice(1)}
-                      </button>
-                    )
-                  })}
+                  <button
+                    onClick={() => handleLog(med, 'taken')}
+                    disabled={isLogging}
+                    style={{
+                      ...s.logBtn,
+                      color: btnColors.taken.color,
+                      borderColor: btnColors.taken.border,
+                      background: takenActive ? btnColors.taken.activeBg : '#fff',
+                      fontWeight: takenActive ? '700' : '500',
+                      opacity: isLogging ? 0.5 : 1,
+                    }}
+                  >
+                    Taken
+                  </button>
+                  <button
+                    onClick={() => handleLog(med, 'skipped')}
+                    disabled={isLogging}
+                    style={{
+                      ...s.logBtn,
+                      color: btnColors.skipped.color,
+                      borderColor: btnColors.skipped.border,
+                      background: skippedActive ? btnColors.skipped.activeBg : '#fff',
+                      fontWeight: skippedActive ? '700' : '500',
+                      opacity: isLogging ? 0.5 : 1,
+                    }}
+                  >
+                    Skipped
+                  </button>
                 </div>
 
               </div>
@@ -267,7 +309,6 @@ const s = {
   error:   { color: '#dc2626', fontSize: '0.875rem', margin: '0.25rem 0 0' },
   success: { color: '#16a34a', fontSize: '0.875rem', margin: '0.25rem 0 0' },
   muted:   { color: '#9ca3af', fontSize: '0.9rem', margin: 0 },
-
   medRow: {
     display: 'flex', flexDirection: 'column', gap: '0.65rem',
     padding: '0.9rem 0', borderBottom: '1px solid #f3f4f6',
@@ -276,17 +317,13 @@ const s = {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem',
   },
   medRight: { display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 },
-  medName:  { fontSize: '0.95rem', fontWeight: '600', color: '#111827' },
-  medDetail:{ fontSize: '0.9rem', color: '#6b7280' },
+  medName:   { fontSize: '0.95rem', fontWeight: '600', color: '#111827' },
+  medDetail: { fontSize: '0.9rem', color: '#6b7280' },
   statusBadge: {
     fontSize: '0.75rem', fontWeight: '700', textTransform: 'uppercase',
     letterSpacing: '0.05em', padding: '0.2rem 0.6rem', borderRadius: '999px',
   },
-  streak: {
-    fontSize: '0.82rem',
-    fontWeight: '700',
-    color: '#d97706',
-  },
+  streak: { fontSize: '0.82rem', fontWeight: '700', color: '#d97706' },
   notLogged: { fontSize: '0.78rem', color: '#9ca3af', fontStyle: 'italic' },
   timeWindow: {
     fontSize: '0.78rem', color: '#6b7280',
@@ -295,7 +332,6 @@ const s = {
   logBtns: { display: 'flex', gap: '0.5rem' },
   logBtn: {
     padding: '0.3rem 0.85rem', fontSize: '0.82rem',
-    border: '1px solid', borderRadius: '6px',
-    cursor: 'pointer', transition: 'opacity 0.1s',
+    border: '1px solid', borderRadius: '6px', cursor: 'pointer',
   },
 }
