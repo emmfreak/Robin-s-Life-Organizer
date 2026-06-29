@@ -3,8 +3,9 @@ import { supabase } from './supabase'
 
 const statusStyle = {
   taken:  { background: '#f0fdf4', color: '#16a34a', label: 'Taken' },
-  skipped:{ background: '#fef2f2', color: '#dc2626', label: 'Skipped' },
   late:   { background: '#fffbeb', color: '#d97706', label: 'Late' },
+  missed: { background: '#f3f4f6', color: '#9ca3af', label: 'Missed' },
+  skipped:{ background: '#fef2f2', color: '#dc2626', label: 'Skipped' },
 }
 
 const btnColors = {
@@ -44,12 +45,81 @@ function parseTimeWindow(windowStr) {
   return { start, end }
 }
 
-// Decides 'taken' vs 'late' by comparing the timestamp to the window end.
-// Falls back to 'taken' if the window string can't be parsed.
-function deriveStatus(takenAt, timeWindow) {
-  const win = parseTimeWindow(timeWindow)
-  if (!win) return 'taken'
-  return new Date(takenAt) <= win.end ? 'taken' : 'late'
+// Formats a Postgres TIME string ("08:00:00") into "8:00 AM".
+function fmtTime(timeStr) {
+  const [h, m] = timeStr.split(':').map(Number)
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  const hour = h % 12 || 12
+  const mins = m === 0 ? '' : `:${String(m).padStart(2, '0')}`
+  return `${hour}${mins} ${ampm}`
+}
+
+// Returns the window-end as a Date for today.
+// Prefers the real window_end column; falls back to parsing the legacy text field.
+function getWindowEnd(med) {
+  if (med.window_end) {
+    const [h, m] = med.window_end.split(':').map(Number)
+    const d = new Date()
+    d.setHours(h, m, 0, 0)
+    return d
+  }
+  const parsed = parseTimeWindow(med.time_window)
+  return parsed ? parsed.end : null
+}
+
+// Returns a human-readable window label for the med row pill.
+function formatWindowLabel(med) {
+  if (med.window_start && med.window_end)
+    return `${fmtTime(med.window_start)} – ${fmtTime(med.window_end)}`
+  return med.time_window || null
+}
+
+// Derives taken / late / missed by anchoring the window end to the closest
+// daily occurrence of that time — not blindly today's date.
+//
+// For a window_end of 19:30, there are three candidates:
+//   yesterday's 19:30, today's 19:30, tomorrow's 19:30.
+// We pick whichever is closest to takenAt, then measure the gap from that.
+//
+// Example: window_end=19:30, takenAt=01:54 AM next day
+//   → closest = yesterday's 19:30 (6h 24m away, not tonight's 17h 36m away)
+//   → 6h 24m > 1 hour → "missed"
+//
+// Outcomes:
+//   taken  — logged at or before the anchored window end
+//   late   — logged 0–60 min after the anchored window end (counts toward streak)
+//   missed — logged >60 min after the anchored window end (breaks streak)
+function deriveStatus(takenAt, med) {
+  // Resolve window end to hours + minutes from whichever source is available.
+  let endH, endM
+  if (med.window_end) {
+    ;[endH, endM] = med.window_end.split(':').map(Number)
+  } else {
+    const parsed = parseTimeWindow(med.time_window)
+    if (!parsed) return 'taken' // no window defined → can't be late
+    endH = parsed.end.getHours()
+    endM = parsed.end.getMinutes()
+  }
+
+  // Build three candidates (yesterday / today / tomorrow relative to takenAt).
+  const takenDate = new Date(takenAt)
+  const candidates = [-1, 0, 1].map(offset => {
+    const d = new Date(takenDate)
+    d.setDate(d.getDate() + offset)
+    d.setHours(endH, endM, 0, 0)
+    return d
+  })
+
+  // Anchor to the occurrence closest in time to when the med was actually taken.
+  const anchoredEnd = candidates.reduce((best, c) =>
+    Math.abs(c - takenDate) < Math.abs(best - takenDate) ? c : best
+  )
+
+  const diffMs = takenDate - anchoredEnd
+
+  if (diffMs <= 0)                return 'taken'   // at or before window end
+  if (diffMs <= 60 * 60 * 1000)  return 'late'    // within 1-hour grace window
+  return 'missed'                                  // too late to count
 }
 
 // Counts consecutive days with status taken OR late, ending today (or yesterday).
@@ -80,7 +150,8 @@ export default function MedsPage() {
   // ── Add-med form ──
   const [name, setName] = useState('')
   const [dose, setDose] = useState('')
-  const [timeWindow, setTimeWindow] = useState('')
+  const [windowStart, setWindowStart] = useState('')
+  const [windowEnd, setWindowEnd] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(false)
@@ -136,9 +207,9 @@ export default function MedsPage() {
     e.preventDefault()
     setError(null); setSuccess(false); setSubmitting(true)
     const { error } = await supabase
-      .from('meds').insert({ name, dose, time_window: timeWindow, active: true })
+      .from('meds').insert({ name, dose, window_start: windowStart || null, window_end: windowEnd || null, active: true })
     if (error) { setError(error.message) }
-    else { setName(''); setDose(''); setTimeWindow(''); setSuccess(true); loadMeds() }
+    else { setName(''); setDose(''); setWindowStart(''); setWindowEnd(''); setSuccess(true); loadMeds() }
     setSubmitting(false)
   }
 
@@ -152,7 +223,7 @@ export default function MedsPage() {
     } else {
       // Stamp current time, then let the window decide whether it's on time or late.
       const takenAt = new Date().toISOString()
-      const status  = deriveStatus(takenAt, med.time_window)
+      const status  = deriveStatus(takenAt, med)
       payload = { med_id: med.id, date: today, status, taken_at: takenAt }
     }
 
@@ -187,9 +258,14 @@ export default function MedsPage() {
                   placeholder="e.g. 50mg" style={s.input} />
               </div>
               <div style={s.field}>
-                <label style={s.label}>Time window</label>
-                <input type="text" value={timeWindow} onChange={e => setTimeWindow(e.target.value)}
-                  placeholder="e.g. 8–9am" style={s.input} />
+                <label style={s.label}>Window start</label>
+                <input type="time" value={windowStart} onChange={e => setWindowStart(e.target.value)}
+                  style={s.input} />
+              </div>
+              <div style={s.field}>
+                <label style={s.label}>Window end</label>
+                <input type="time" value={windowEnd} onChange={e => setWindowEnd(e.target.value)}
+                  style={s.input} />
               </div>
             </div>
             {error && <p style={s.error}>{error}</p>}
@@ -216,7 +292,7 @@ export default function MedsPage() {
             const streak   = streaks[med.id] || 0
             // Taken button lights up whether the derived status was 'taken' or 'late' —
             // both mean the user pressed Taken.
-            const takenActive   = log?.status === 'taken' || log?.status === 'late'
+            const takenActive   = log?.status === 'taken' || log?.status === 'late' || log?.status === 'missed'
             const skippedActive = log?.status === 'skipped'
 
             return (
@@ -236,7 +312,9 @@ export default function MedsPage() {
                     ) : (
                       <span style={s.notLogged}>not logged yet</span>
                     )}
-                    {med.time_window && <span style={s.timeWindow}>{med.time_window}</span>}
+                    {formatWindowLabel(med) && (
+                      <span style={s.timeWindow}>{formatWindowLabel(med)}</span>
+                    )}
                   </div>
                 </div>
 
@@ -293,7 +371,7 @@ const s = {
   },
   sectionTitle: { margin: '0 0 1rem', fontSize: '1rem', fontWeight: '600', color: '#374151' },
   form: { display: 'flex', flexDirection: 'column', gap: '0.5rem' },
-  row: { display: 'flex', gap: '1rem' },
+  row: { display: 'flex', gap: '1rem', flexWrap: 'wrap' },
   field: { display: 'flex', flexDirection: 'column', gap: '0.25rem', flex: 1 },
   label: { fontSize: '0.8rem', fontWeight: '600', color: '#6b7280', marginTop: '0.4rem' },
   input: {
