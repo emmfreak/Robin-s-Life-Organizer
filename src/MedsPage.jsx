@@ -13,37 +13,12 @@ const btnColors = {
   skipped: { color: '#dc2626', border: '#fecaca', activeBg: '#fef2f2' },
 }
 
-// Parses "8-9am", "8:30–9:30am", "8am-9pm" into { start: Date, end: Date } for today.
-// Returns null if the string can't be understood — callers treat null as "no window."
-function parseTimeWindow(windowStr) {
-  if (!windowStr) return null
-  const norm = windowStr.replace(/[–—]/g, '-').trim().toLowerCase()
-  const m = norm.match(
-    /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*-\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/
-  )
-  if (!m) return null
-
-  let [, sh, sm = '0', smer, eh, em = '0', emer] = m
-  sh = parseInt(sh); eh = parseInt(eh)
-  sm = parseInt(sm); em = parseInt(em)
-
-  // If only one side has am/pm, inherit it to the other ("8-9am" → both am).
-  if (!smer && emer) smer = emer
-  if (!emer && smer) emer = smer
-  if (!smer) smer = 'am'
-  if (!emer) emer = 'am'
-
-  // Convert to 24-hour.
-  if (smer === 'pm' && sh !== 12) sh += 12
-  if (smer === 'am' && sh === 12) sh = 0
-  if (emer === 'pm' && eh !== 12) eh += 12
-  if (emer === 'am' && eh === 12) eh = 0
-
-  const now = new Date()
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), sh, sm, 0)
-  const end   = new Date(now.getFullYear(), now.getMonth(), now.getDate(), eh, em, 0)
-  return { start, end }
+// Precise moments are stored UTC (taken_at).
+// The day a dose belongs to is always the local calendar day via localDateStr.
+function localDateStr(date = new Date()) {
+  return date.toLocaleDateString('en-CA') // YYYY-MM-DD in local time
 }
+
 
 // Formats a Postgres TIME string ("08:00:00") into "8:00 AM".
 function fmtTime(timeStr) {
@@ -54,24 +29,14 @@ function fmtTime(timeStr) {
   return `${hour}${mins} ${ampm}`
 }
 
-// Returns the window-end as a Date for today.
-// Prefers the real window_end column; falls back to parsing the legacy text field.
-function getWindowEnd(med) {
-  if (med.window_end) {
-    const [h, m] = med.window_end.split(':').map(Number)
-    const d = new Date()
-    d.setHours(h, m, 0, 0)
-    return d
-  }
-  const parsed = parseTimeWindow(med.time_window)
-  return parsed ? parsed.end : null
-}
-
 // Returns a human-readable window label for the med row pill.
+// window_start is stored and displayed but not yet used in status logic (intentional — see Fix 4 note).
 function formatWindowLabel(med) {
   if (med.window_start && med.window_end)
     return `${fmtTime(med.window_start)} – ${fmtTime(med.window_end)}`
-  return med.time_window || null
+  if (med.window_end)
+    return `until ${fmtTime(med.window_end)}`
+  return null
 }
 
 // Derives taken / late / missed by anchoring the window end to the closest
@@ -89,20 +54,34 @@ function formatWindowLabel(med) {
 //   taken  — logged at or before the anchored window end
 //   late   — logged 0–60 min after the anchored window end (counts toward streak)
 //   missed — logged >60 min after the anchored window end (breaks streak)
+// Returns { status, doseDate } where doseDate is the local YYYY-MM-DD of the
+// dose's *anchored* day — which may differ from today if logging cross-midnight.
+//
+// Day-anchoring: for a window_end of 23:30, three candidate occurrences exist
+// (yesterday's, today's, tomorrow's). We pick the one closest to takenAt, then
+// measure the gap from that anchor — not blindly from today's 23:30.
+//
+// 11:30 PM window, logged at 12:15 AM Tuesday:
+//   closest anchor = Monday 23:30 (45 min away, not Tuesday 23:30 at 23h 15m)
+//   45 min ≤ 60 min → status='late', doseDate='Monday' ✓
+//
+// Outcomes:
+//   taken  — at or before the anchored window end
+//   late   — 0–60 min after (counts toward streak)
+//   missed — >60 min after (breaks streak)
 function deriveStatus(takenAt, med) {
-  // Resolve window end to hours + minutes from whichever source is available.
-  let endH, endM
-  if (med.window_end) {
-    ;[endH, endM] = med.window_end.split(':').map(Number)
-  } else {
-    const parsed = parseTimeWindow(med.time_window)
-    if (!parsed) return 'taken' // no window defined → can't be late
-    endH = parsed.end.getHours()
-    endM = parsed.end.getMinutes()
+  const takenDate = new Date(takenAt)
+
+  if (!med.window_end) {
+    // No window defined — can't be late or missed.
+    return { status: 'taken', doseDate: localDateStr(takenDate) }
   }
 
-  // Build three candidates (yesterday / today / tomorrow relative to takenAt).
-  const takenDate = new Date(takenAt)
+  // window_start is intentionally unused here — it's stored and displayed but
+  // status logic only needs the end. An "too early" check can be added later.
+  const [endH, endM] = med.window_end.split(':').map(Number)
+
+  // Build three candidate window-end timestamps relative to takenAt's date.
   const candidates = [-1, 0, 1].map(offset => {
     const d = new Date(takenDate)
     d.setDate(d.getDate() + offset)
@@ -110,16 +89,18 @@ function deriveStatus(takenAt, med) {
     return d
   })
 
-  // Anchor to the occurrence closest in time to when the med was actually taken.
+  // Anchor to whichever occurrence is closest to when the med was actually taken.
   const anchoredEnd = candidates.reduce((best, c) =>
     Math.abs(c - takenDate) < Math.abs(best - takenDate) ? c : best
   )
 
-  const diffMs = takenDate - anchoredEnd
+  // doseDate is the local calendar day of the anchor — this is what the log files under.
+  const doseDate = localDateStr(anchoredEnd)
+  const diffMs   = takenDate - anchoredEnd
 
-  if (diffMs <= 0)                return 'taken'   // at or before window end
-  if (diffMs <= 60 * 60 * 1000)  return 'late'    // within 1-hour grace window
-  return 'missed'                                  // too late to count
+  if (diffMs <= 0)               return { status: 'taken',  doseDate }
+  if (diffMs <= 60 * 60 * 1000) return { status: 'late',   doseDate }
+  return                                { status: 'missed', doseDate }
 }
 
 // Counts consecutive days with status taken OR late, ending today (or yesterday).
@@ -127,11 +108,10 @@ function computeStreak(dates) {
   if (dates.length === 0) return 0
   const dateSet = new Set(dates)
 
-  const todayD = new Date()
-  const todayStr = todayD.toLocaleDateString('en-CA')
-  const yesterdayD = new Date(todayD)
+  const todayStr     = localDateStr()
+  const yesterdayD   = new Date()
   yesterdayD.setDate(yesterdayD.getDate() - 1)
-  const yesterdayStr = yesterdayD.toLocaleDateString('en-CA')
+  const yesterdayStr = localDateStr(yesterdayD)
 
   let cursor = dateSet.has(todayStr) ? todayStr : dateSet.has(yesterdayStr) ? yesterdayStr : null
   if (!cursor) return 0
@@ -141,7 +121,7 @@ function computeStreak(dates) {
     streak++
     const d = new Date(cursor + 'T00:00:00')
     d.setDate(d.getDate() - 1)
-    cursor = d.toLocaleDateString('en-CA')
+    cursor = localDateStr(d)
   }
   return streak
 }
@@ -161,9 +141,10 @@ export default function MedsPage() {
   const [loadingMeds, setLoadingMeds] = useState(true)
   const [logsToday, setLogsToday] = useState({})
   const [loggingId, setLoggingId] = useState(null)
+  const [removingId, setRemovingId] = useState(null)
   const [streaks, setStreaks] = useState({})
 
-  const today = new Date().toLocaleDateString('en-CA')
+  const today = localDateStr()
 
   async function loadMeds() {
     const { data, error } = await supabase
@@ -215,17 +196,28 @@ export default function MedsPage() {
 
   async function handleLog(med, action) {
     setLoggingId(med.id)
-    const existing = logsToday[med.id]
 
-    let payload
+    let payload, doseDate
+
     if (action === 'skipped') {
-      payload = { med_id: med.id, date: today, status: 'skipped', taken_at: null }
+      // Skipped is a deliberate same-day action — no timestamp to anchor from.
+      doseDate = today
+      payload = { med_id: med.id, date: doseDate, status: 'skipped', taken_at: null }
     } else {
-      // Stamp current time, then let the window decide whether it's on time or late.
       const takenAt = new Date().toISOString()
-      const status  = deriveStatus(takenAt, med)
-      payload = { med_id: med.id, date: today, status, taken_at: takenAt }
+      const derived = deriveStatus(takenAt, med)
+      doseDate = derived.doseDate   // may be yesterday if logging cross-midnight
+      payload  = { med_id: med.id, date: doseDate, status: derived.status, taken_at: takenAt }
     }
+
+    // Query by the dose's actual date, not the logsToday cache (which only covers
+    // today and would miss a cross-midnight case, causing a spurious INSERT).
+    const { data: existing } = await supabase
+      .from('med_logs')
+      .select('id')
+      .eq('med_id', med.id)
+      .eq('date', doseDate)
+      .maybeSingle()
 
     if (existing) {
       await supabase.from('med_logs').update(payload).eq('id', existing.id)
@@ -236,6 +228,13 @@ export default function MedsPage() {
     await loadLogsToday()
     await loadStreaks()
     setLoggingId(null)
+  }
+
+  async function handleRemove(med) {
+    setRemovingId(med.id)
+    await supabase.from('meds').update({ active: false }).eq('id', med.id)
+    await loadMeds()
+    setRemovingId(null)
   }
 
   return (
@@ -315,6 +314,14 @@ export default function MedsPage() {
                     {formatWindowLabel(med) && (
                       <span style={s.timeWindow}>{formatWindowLabel(med)}</span>
                     )}
+                    <button
+                      onClick={() => handleRemove(med)}
+                      disabled={removingId === med.id}
+                      style={s.removeBtn}
+                      title="Remove medication"
+                    >
+                      ×
+                    </button>
                   </div>
                 </div>
 
@@ -411,5 +418,11 @@ const s = {
   logBtn: {
     padding: '0.3rem 0.85rem', fontSize: '0.82rem',
     border: '1px solid', borderRadius: '6px', cursor: 'pointer',
+  },
+  removeBtn: {
+    padding: '0.1rem 0.4rem', fontSize: '1rem', lineHeight: 1,
+    color: '#9ca3af', background: 'transparent',
+    border: '1px solid #e5e7eb', borderRadius: '4px', cursor: 'pointer',
+    flexShrink: 0,
   },
 }
