@@ -121,6 +121,14 @@ export default function SleepPage() {
 
   useEffect(() => { loadHistory() }, [])
 
+  // Clear the "Sleep logged: …" message a few seconds after it appears,
+  // rather than leaving it stuck on screen indefinitely.
+  useEffect(() => {
+    if (!savedDuration) return
+    const timer = setTimeout(() => setSavedDuration(null), 4000)
+    return () => clearTimeout(timer)
+  }, [savedDuration])
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError(null); setSavedDuration(null)
