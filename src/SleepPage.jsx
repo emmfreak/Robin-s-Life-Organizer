@@ -20,11 +20,12 @@ function timeToMinutes(timeStr) {
 // Minutes between bedtime and wake_time, crossing midnight.
 // If wake looks "earlier" than bedtime (e.g. bed 23:00, wake 07:00), the wake
 // is the next day — roll it forward 24h instead of going negative.
+// Identical bedtime/wake time is 0, not a full 24h roll-forward.
 function sleepDurationMinutes(bedtime, wakeTime) {
   const bedMins = timeToMinutes(bedtime)
-  let wakeMins = timeToMinutes(wakeTime)
-  if (wakeMins <= bedMins) wakeMins += 24 * 60
-  return wakeMins - bedMins
+  const wakeMins = timeToMinutes(wakeTime)
+  if (wakeMins === bedMins) return 0
+  return wakeMins < bedMins ? wakeMins + 24 * 60 - bedMins : wakeMins - bedMins
 }
 
 // Formats total minutes as "7h 45m".
@@ -51,23 +52,42 @@ function fmtDate(dateStr) {
   })
 }
 
-// Average duration and bedtime spread over a set of nights (most recent 7).
-function computeStats(nights) {
-  if (nights.length === 0) return null
+// The last 7 calendar dates (today back through 6 days ago), as localDateStr strings.
+function last7Dates() {
+  const dates = []
+  for (let i = 0; i < 7; i++) {
+    const d = new Date()
+    d.setDate(d.getDate() - i)
+    dates.push(localDateStr(d))
+  }
+  return dates
+}
 
-  const totalMinutes = nights.reduce(
+// Average duration and bedtime spread over the last 7 calendar days — not the
+// last 7 logged rows. Skipped nights stay visible as missing coverage instead
+// of quietly dropping out of the average.
+function computeStats(history) {
+  const windowDates = last7Dates()
+  const byDate = new Map(history.map(n => [n.date, n]))
+  const loggedNights = windowDates.map(date => byDate.get(date)).filter(Boolean)
+
+  if (loggedNights.length === 0) {
+    return { loggedCount: 0, windowSize: windowDates.length }
+  }
+
+  const totalMinutes = loggedNights.reduce(
     (sum, n) => sum + sleepDurationMinutes(n.bedtime, n.wake_time), 0
   )
-  const avgMinutes = Math.round(totalMinutes / nights.length)
+  const avgMinutes = Math.round(totalMinutes / loggedNights.length)
 
-  let earliestBedtime = nights[0].bedtime
-  let latestBedtime = nights[0].bedtime
-  for (const n of nights) {
+  let earliestBedtime = loggedNights[0].bedtime
+  let latestBedtime = loggedNights[0].bedtime
+  for (const n of loggedNights) {
     if (timeToMinutes(n.bedtime) < timeToMinutes(earliestBedtime)) earliestBedtime = n.bedtime
     if (timeToMinutes(n.bedtime) > timeToMinutes(latestBedtime)) latestBedtime = n.bedtime
   }
 
-  return { avgMinutes, earliestBedtime, latestBedtime, count: nights.length }
+  return { avgMinutes, earliestBedtime, latestBedtime, loggedCount: loggedNights.length, windowSize: windowDates.length }
 }
 
 export default function SleepPage() {
@@ -80,7 +100,7 @@ export default function SleepPage() {
   const [history, setHistory] = useState([])
   const [loadingHistory, setLoadingHistory] = useState(true)
 
-  const stats = computeStats(history.slice(0, 7))
+  const stats = computeStats(history)
 
   async function loadHistory() {
     const { data, error } = await supabase
@@ -96,7 +116,13 @@ export default function SleepPage() {
 
   async function handleSubmit(e) {
     e.preventDefault()
-    setError(null); setSavedDuration(null); setSubmitting(true)
+    setError(null); setSavedDuration(null)
+
+    if (bedtime === wakeTime) {
+      setError("Bedtime and wake time can't be the same.")
+      return
+    }
+    setSubmitting(true)
 
     const date = localDateStr() // night files under today, the wake-up date
     const payload = { date, bedtime, wake_time: wakeTime }
@@ -152,11 +178,15 @@ export default function SleepPage() {
     <section style={s.section}>
       <h2 style={s.sectionTitle}>Recent nights</h2>
 
-      {stats && (
+      {!loadingHistory && stats.loggedCount === 0 && (
+        <p style={s.muted}>No nights logged in the last {stats.windowSize} days.</p>
+      )}
+      {!loadingHistory && stats.loggedCount > 0 && (
         <div style={s.stats}>
           <div style={s.statBlock}>
-            <span style={s.statLabel}>Avg sleep (last {stats.count})</span>
-            <span style={s.statValue}>{formatDuration(stats.avgMinutes)}</span>
+            <span style={s.statValue}>
+              Avg {formatDuration(stats.avgMinutes)} · {stats.loggedCount} of last {stats.windowSize} nights logged
+            </span>
           </div>
           <div style={s.statBlock}>
             <span style={s.statLabel}>Bedtime range</span>
