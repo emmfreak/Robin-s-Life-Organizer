@@ -80,6 +80,9 @@ function computeStats(history) {
   )
   const avgMinutes = Math.round(totalMinutes / loggedNights.length)
 
+  const totalWakeups = loggedNights.reduce((sum, n) => sum + n.wakeups, 0)
+  const avgWakeups = totalWakeups / loggedNights.length
+
   let earliestBedtime = loggedNights[0].bedtime
   let latestBedtime = loggedNights[0].bedtime
   for (const n of loggedNights) {
@@ -87,12 +90,16 @@ function computeStats(history) {
     if (timeToMinutes(n.bedtime) > timeToMinutes(latestBedtime)) latestBedtime = n.bedtime
   }
 
-  return { avgMinutes, earliestBedtime, latestBedtime, loggedCount: loggedNights.length, windowSize: windowDates.length }
+  return {
+    avgMinutes, avgWakeups, earliestBedtime, latestBedtime,
+    loggedCount: loggedNights.length, windowSize: windowDates.length,
+  }
 }
 
 export default function SleepPage() {
   const [bedtime, setBedtime] = useState('')
   const [wakeTime, setWakeTime] = useState(localTimeStr())
+  const [wakeups, setWakeups] = useState('0')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
   const [savedDuration, setSavedDuration] = useState(null)
@@ -125,7 +132,8 @@ export default function SleepPage() {
     setSubmitting(true)
 
     const date = localDateStr() // night files under today, the wake-up date
-    const payload = { date, bedtime, wake_time: wakeTime }
+    const wakeupsValue = Math.max(0, parseInt(wakeups, 10) || 0)
+    const payload = { date, bedtime, wake_time: wakeTime, wakeups: wakeupsValue }
 
     const { data: existing } = await supabase
       .from('sleep_logs')
@@ -166,6 +174,14 @@ export default function SleepPage() {
               required style={s.input}
             />
           </div>
+          <div style={s.field}>
+            <label style={s.label}>Times woke up</label>
+            <input
+              type="number" min="0" step="1" value={wakeups}
+              onChange={e => setWakeups(e.target.value)}
+              style={s.input}
+            />
+          </div>
         </div>
         {error && <p style={s.error}>{error}</p>}
         {savedDuration && <p style={s.success}>Sleep logged: {savedDuration}</p>}
@@ -194,6 +210,10 @@ export default function SleepPage() {
               {fmtTime(stats.earliestBedtime)} – {fmtTime(stats.latestBedtime)}
             </span>
           </div>
+          <div style={s.statBlock}>
+            <span style={s.statLabel}>Avg wakeups</span>
+            <span style={s.statValue}>{stats.avgWakeups.toFixed(1)}</span>
+          </div>
         </div>
       )}
 
@@ -206,6 +226,7 @@ export default function SleepPage() {
         <div key={night.id} style={s.nightRow}>
           <span style={s.nightDate}>{fmtDate(night.date)}</span>
           <span style={s.nightTimes}>{fmtTime(night.bedtime)} → {fmtTime(night.wake_time)}</span>
+          {night.wakeups > 0 && <span style={s.wakeupsTag}>woke {night.wakeups}×</span>}
           <span style={s.nightDuration}>
             {formatDuration(sleepDurationMinutes(night.bedtime, night.wake_time))}
           </span>
@@ -253,5 +274,10 @@ const s = {
   },
   nightDate:     { fontSize: '0.9rem', fontWeight: '600', color: '#111827', flex: 1 },
   nightTimes:    { fontSize: '0.85rem', color: '#6b7280', flex: 1 },
+  wakeupsTag: {
+    fontSize: '0.75rem', color: '#9ca3af',
+    background: '#f3f4f6', padding: '0.15rem 0.5rem', borderRadius: '999px',
+    flexShrink: 0,
+  },
   nightDuration: { fontSize: '0.85rem', fontWeight: '700', color: '#4f46e5', flexShrink: 0 },
 }
