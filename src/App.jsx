@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from './supabase'
 import TasksPage from './TasksPage'
 import MedsPage from './MedsPage'
+import SleepPage from './SleepPage'
 
 function LoginScreen() {
   const [email, setEmail] = useState('')
@@ -72,17 +73,37 @@ export default function App() {
           >
             Meds
           </button>
+          <button
+            onClick={() => setPage('sleep')}
+            style={page === 'sleep' ? s.navActive : s.navBtn}
+          >
+            Sleep
+          </button>
         </nav>
         <button onClick={handleSignOut} style={s.signOutBtn}>Sign out</button>
       </header>
 
       {page === 'tasks' && <TasksPage />}
       {page === 'meds'  && <MedsPage />}
+      {page === 'sleep' && (
+        <div style={s.page}>
+          <main style={s.main}>
+            <SleepPage />
+          </main>
+        </div>
+      )}
     </div>
   )
 }
 
 const s = {
+  // ── Page wrapper (for pages that don't own their own full-screen layout) ──
+  page: { minHeight: '100vh', background: '#f5f5f5', fontFamily: 'system-ui, sans-serif' },
+  main: {
+    maxWidth: '640px', margin: '0 auto', padding: '1.5rem 1rem 3rem',
+    display: 'flex', flexDirection: 'column', gap: '1.5rem',
+  },
+
   // ── Login screen ──
   center: {
     minHeight: '100vh',
