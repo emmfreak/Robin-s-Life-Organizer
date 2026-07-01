@@ -3,6 +3,7 @@ import { supabase } from './supabase'
 import TasksPage from './TasksPage'
 import MedsPage from './MedsPage'
 import SleepPage from './SleepPage'
+import { colors, font } from './theme'
 
 function LoginScreen() {
   const [email, setEmail] = useState('')
@@ -98,7 +99,7 @@ export default function App() {
 
 const s = {
   // ── Page wrapper (for pages that don't own their own full-screen layout) ──
-  page: { minHeight: '100vh', background: '#f5f5f5', fontFamily: 'system-ui, sans-serif' },
+  page: { minHeight: '100vh', background: colors.bg, fontFamily: font },
   main: {
     maxWidth: '640px', margin: '0 auto', padding: '1.5rem 1rem 3rem',
     display: 'flex', flexDirection: 'column', gap: '1.5rem',
@@ -110,37 +111,49 @@ const s = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: '#f5f5f5',
+    background: colors.bg,
+    fontFamily: font,
   },
   card: {
-    background: '#fff',
+    background: colors.surface,
+    border: `1px solid ${colors.border}`,
     borderRadius: '10px',
     padding: '2.5rem',
     width: '100%',
     maxWidth: '380px',
-    boxShadow: '0 2px 16px rgba(0,0,0,0.1)',
   },
-  title: { margin: '0 0 1.5rem', fontSize: '1.4rem', textAlign: 'center' },
+  title: { margin: '0 0 1.5rem', fontSize: '1.4rem', textAlign: 'center', color: colors.white },
   form: { display: 'flex', flexDirection: 'column', gap: '0.5rem' },
-  label: { fontSize: '0.85rem', fontWeight: '600', marginTop: '0.5rem' },
-  input: { padding: '0.6rem 0.8rem', fontSize: '1rem', border: '1px solid #ccc', borderRadius: '6px' },
-  button: { marginTop: '1rem', padding: '0.7rem', fontSize: '1rem', background: '#4f46e5', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' },
-  error: { color: '#dc2626', fontSize: '0.875rem', margin: '0.25rem 0 0' },
+  label: { fontSize: '0.85rem', fontWeight: '600', marginTop: '0.5rem', color: colors.white },
+  input: {
+    padding: '0.6rem 0.8rem', fontSize: '1rem',
+    border: `1px solid ${colors.border}`, borderRadius: '6px',
+    background: colors.bg, color: colors.white,
+  },
+  button: {
+    marginTop: '1rem', padding: '0.7rem', fontSize: '1rem',
+    background: colors.yellow, color: colors.black, fontWeight: '700',
+    border: 'none', borderRadius: '6px', cursor: 'pointer',
+  },
+  error: { color: colors.yellow, fontWeight: '700', fontSize: '0.875rem', margin: '0.25rem 0 0' },
 
   // ── Shared header ──
   header: {
-    background: '#4f46e5',
-    color: '#fff',
+    background: colors.bg,
+    borderBottom: `2px solid ${colors.yellow}`,
+    color: colors.white,
     padding: '0.75rem 1.5rem',
     display: 'flex',
     alignItems: 'center',
     gap: '1.5rem',
+    fontFamily: font,
   },
   appTitle: {
     margin: 0,
     fontSize: '1rem',
     fontWeight: '600',
     flexShrink: 0,
+    color: colors.yellow,
   },
   nav: {
     display: 'flex',
@@ -149,7 +162,7 @@ const s = {
   },
   navBtn: {
     background: 'transparent',
-    color: 'rgba(255,255,255,0.65)',
+    color: colors.gray,
     border: 'none',
     borderRadius: '6px',
     padding: '0.4rem 0.9rem',
@@ -158,19 +171,19 @@ const s = {
     fontWeight: '500',
   },
   navActive: {
-    background: 'rgba(255,255,255,0.18)',
-    color: '#fff',
+    background: colors.yellow,
+    color: colors.black,
     border: 'none',
     borderRadius: '6px',
     padding: '0.4rem 0.9rem',
     cursor: 'pointer',
     fontSize: '0.9rem',
-    fontWeight: '600',
+    fontWeight: '700',
   },
   signOutBtn: {
-    background: 'rgba(255,255,255,0.15)',
-    color: '#fff',
-    border: 'none',
+    background: 'transparent',
+    color: colors.yellow,
+    border: `1px solid ${colors.yellow}`,
     borderRadius: '6px',
     padding: '0.4rem 0.9rem',
     cursor: 'pointer',

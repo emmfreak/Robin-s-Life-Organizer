@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './supabase'
+import { colors, font } from './theme'
 
 const importanceBadge = {
-  high:   { background: '#fef2f2', color: '#dc2626' },
-  medium: { background: '#fffbeb', color: '#d97706' },
-  low:    { background: '#f0fdf4', color: '#16a34a' },
+  high:   { background: colors.yellow, color: colors.black },
+  medium: { background: colors.white, color: colors.black },
+  low:    { background: 'transparent', color: colors.white, border: `1px solid ${colors.border}` },
 }
 
 const IMPORTANCE_RANK = { high: 3, medium: 2, low: 1 }
@@ -246,8 +247,8 @@ export default function TasksPage() {
 const s = {
   page: {
     minHeight: '100vh',
-    background: '#f5f5f5',
-    fontFamily: 'system-ui, sans-serif',
+    background: colors.bg,
+    fontFamily: font,
   },
   main: {
     maxWidth: '640px',
@@ -258,11 +259,11 @@ const s = {
     gap: '1.5rem',
   },
   hero: {
-    background: '#4f46e5',
+    background: colors.surface,
+    border: `2px solid ${colors.yellow}`,
     borderRadius: '12px',
     padding: '1.75rem',
-    boxShadow: '0 4px 16px rgba(79,70,229,0.3)',
-    color: '#fff',
+    color: colors.white,
   },
   heroLabel: {
     margin: '0 0 0.5rem',
@@ -270,7 +271,7 @@ const s = {
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: '0.1em',
-    opacity: 0.7,
+    color: colors.yellow,
   },
   heroTitle: {
     margin: '0 0 0.75rem',
@@ -286,23 +287,23 @@ const s = {
   heroEmpty: {
     margin: 0,
     fontSize: '1rem',
-    opacity: 0.8,
+    color: colors.gray,
   },
   heroDueDate: {
     fontSize: '0.85rem',
-    opacity: 0.75,
+    color: colors.gray,
   },
   section: {
-    background: '#fff',
+    background: colors.surface,
+    border: `1px solid ${colors.border}`,
     borderRadius: '10px',
     padding: '1.5rem',
-    boxShadow: '0 1px 6px rgba(0,0,0,0.08)',
   },
   sectionTitle: {
     margin: '0 0 1rem',
     fontSize: '1rem',
     fontWeight: '600',
-    color: '#374151',
+    color: colors.white,
   },
   form: {
     display: 'flex',
@@ -322,31 +323,35 @@ const s = {
   label: {
     fontSize: '0.8rem',
     fontWeight: '600',
-    color: '#6b7280',
+    color: colors.white,
     marginTop: '0.4rem',
   },
   input: {
     padding: '0.55rem 0.75rem',
     fontSize: '1rem',
-    border: '1px solid #d1d5db',
+    border: `1px solid ${colors.border}`,
     borderRadius: '6px',
     width: '100%',
     boxSizing: 'border-box',
+    background: colors.bg,
+    color: colors.white,
   },
   select: {
     padding: '0.55rem 0.75rem',
     fontSize: '1rem',
-    border: '1px solid #d1d5db',
+    border: `1px solid ${colors.border}`,
     borderRadius: '6px',
-    background: '#fff',
+    background: colors.bg,
+    color: colors.white,
     width: '100%',
   },
   button: {
     marginTop: '0.75rem',
     padding: '0.65rem',
     fontSize: '1rem',
-    background: '#4f46e5',
-    color: '#fff',
+    fontWeight: '700',
+    background: colors.yellow,
+    color: colors.black,
     border: 'none',
     borderRadius: '6px',
     cursor: 'pointer',
@@ -355,17 +360,19 @@ const s = {
     paddingRight: '1.5rem',
   },
   error: {
-    color: '#dc2626',
+    color: colors.yellow,
+    fontWeight: '700',
     fontSize: '0.875rem',
     margin: '0.25rem 0 0',
   },
   success: {
-    color: '#16a34a',
+    color: colors.white,
+    fontWeight: '700',
     fontSize: '0.875rem',
     margin: '0.25rem 0 0',
   },
   muted: {
-    color: '#9ca3af',
+    color: colors.gray,
     fontSize: '0.9rem',
     margin: 0,
   },
@@ -374,7 +381,7 @@ const s = {
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '0.75rem 0',
-    borderBottom: '1px solid #f3f4f6',
+    borderBottom: `1px solid ${colors.border}`,
   },
   taskInfo: {
     display: 'flex',
@@ -383,7 +390,7 @@ const s = {
   },
   taskTitle: {
     fontSize: '0.95rem',
-    color: '#111827',
+    color: colors.white,
   },
   taskMeta: {
     display: 'flex',
@@ -400,37 +407,37 @@ const s = {
   },
   dueDate: {
     fontSize: '0.8rem',
-    color: '#6b7280',
+    color: colors.gray,
   },
   doneBtn: {
     flexShrink: 0,
     padding: '0.35rem 0.85rem',
     fontSize: '0.85rem',
-    fontWeight: '600',
-    color: '#16a34a',
-    background: '#f0fdf4',
-    border: '1px solid #bbf7d0',
+    fontWeight: '700',
+    color: colors.black,
+    background: colors.yellow,
+    border: 'none',
     borderRadius: '6px',
     cursor: 'pointer',
   },
 
-  // ── Wins archive ── dark card so it reads as a different kind of list
+  // ── Wins archive ── same surface, yellow border, reads as an accented list
   wins: {
-    background: '#0f172a',
+    background: colors.surface,
+    border: `2px solid ${colors.yellow}`,
     borderRadius: '10px',
     padding: '1.5rem',
-    boxShadow: '0 1px 6px rgba(0,0,0,0.2)',
   },
   winsTitle: {
     margin: '0 0 1rem',
     fontSize: '1rem',
     fontWeight: '700',
-    color: '#fbbf24',
+    color: colors.yellow,
     textTransform: 'uppercase',
     letterSpacing: '0.08em',
   },
   winsMuted: {
-    color: '#475569',
+    color: colors.gray,
     fontSize: '0.9rem',
     margin: 0,
   },
@@ -439,10 +446,10 @@ const s = {
     alignItems: 'flex-start',
     gap: '0.75rem',
     padding: '0.65rem 0',
-    borderBottom: '1px solid #1e293b',
+    borderBottom: `1px solid ${colors.border}`,
   },
   winCheck: {
-    color: '#22c55e',
+    color: colors.yellow,
     fontWeight: '700',
     fontSize: '1rem',
     flexShrink: 0,
@@ -455,10 +462,10 @@ const s = {
   },
   winName: {
     fontSize: '0.95rem',
-    color: '#e2e8f0',
+    color: colors.white,
   },
   winDate: {
     fontSize: '0.78rem',
-    color: '#64748b',
+    color: colors.gray,
   },
 }
