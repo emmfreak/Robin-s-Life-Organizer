@@ -4,8 +4,13 @@
 
 body {
   margin: 0;
-  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
-  background: #f5f5f5;
+  font-family: 'Consolas', 'SFMono-Regular', Menlo, 'Liberation Mono', monospace;
+  background: #0d0d0d;
+}
+
+/* Form controls don't inherit font-family from the page by default. */
+input, select, button, textarea {
+  font-family: inherit;
 }
 
 #root {

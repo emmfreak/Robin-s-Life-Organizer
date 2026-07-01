@@ -1,16 +1,12 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './supabase'
+import { colors, font } from './theme'
 
 const statusStyle = {
-  taken:  { background: '#f0fdf4', color: '#16a34a', label: 'Taken' },
-  late:   { background: '#fffbeb', color: '#d97706', label: 'Late' },
-  missed: { background: '#f3f4f6', color: '#9ca3af', label: 'Missed' },
-  skipped:{ background: '#fef2f2', color: '#dc2626', label: 'Skipped' },
-}
-
-const btnColors = {
-  taken:   { color: '#16a34a', border: '#bbf7d0', activeBg: '#f0fdf4' },
-  skipped: { color: '#dc2626', border: '#fecaca', activeBg: '#fef2f2' },
+  taken:  { background: colors.yellow, color: colors.black, label: 'Taken' },
+  late:   { background: colors.white, color: colors.black, label: 'Late' },
+  missed: { background: 'transparent', color: colors.gray, border: `1px solid ${colors.border}`, label: 'Missed' },
+  skipped:{ background: 'transparent', color: colors.white, border: `1px solid ${colors.border}`, label: 'Skipped' },
 }
 
 // Precise moments are stored UTC (taken_at).
@@ -305,7 +301,7 @@ export default function MedsPage() {
                   <div style={s.medRight}>
                     {streak > 0 && <span style={s.streak}>🔥 {streak}</span>}
                     {st ? (
-                      <span style={{ ...s.statusBadge, background: st.background, color: st.color }}>
+                      <span style={{ ...s.statusBadge, background: st.background, color: st.color, border: st.border }}>
                         {st.label}
                       </span>
                     ) : (
@@ -331,9 +327,9 @@ export default function MedsPage() {
                     disabled={isLogging}
                     style={{
                       ...s.logBtn,
-                      color: btnColors.taken.color,
-                      borderColor: btnColors.taken.border,
-                      background: takenActive ? btnColors.taken.activeBg : '#fff',
+                      color: takenActive ? colors.black : colors.white,
+                      borderColor: takenActive ? colors.yellow : colors.border,
+                      background: takenActive ? colors.yellow : 'transparent',
                       fontWeight: takenActive ? '700' : '500',
                       opacity: isLogging ? 0.5 : 1,
                     }}
@@ -345,9 +341,9 @@ export default function MedsPage() {
                     disabled={isLogging}
                     style={{
                       ...s.logBtn,
-                      color: btnColors.skipped.color,
-                      borderColor: btnColors.skipped.border,
-                      background: skippedActive ? btnColors.skipped.activeBg : '#fff',
+                      color: skippedActive ? colors.black : colors.white,
+                      borderColor: skippedActive ? colors.white : colors.border,
+                      background: skippedActive ? colors.white : 'transparent',
                       fontWeight: skippedActive ? '700' : '500',
                       opacity: isLogging ? 0.5 : 1,
                     }}
@@ -367,52 +363,51 @@ export default function MedsPage() {
 }
 
 const s = {
-  page: { minHeight: '100vh', background: '#f5f5f5', fontFamily: 'system-ui, sans-serif' },
+  page: { minHeight: '100vh', background: colors.bg, fontFamily: font },
   main: {
     maxWidth: '640px', margin: '0 auto', padding: '1.5rem 1rem 3rem',
     display: 'flex', flexDirection: 'column', gap: '1.5rem',
   },
   section: {
-    background: '#fff', borderRadius: '10px', padding: '1.5rem',
-    boxShadow: '0 1px 6px rgba(0,0,0,0.08)',
+    background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: '10px', padding: '1.5rem',
   },
-  sectionTitle: { margin: '0 0 1rem', fontSize: '1rem', fontWeight: '600', color: '#374151' },
+  sectionTitle: { margin: '0 0 1rem', fontSize: '1rem', fontWeight: '600', color: colors.white },
   form: { display: 'flex', flexDirection: 'column', gap: '0.5rem' },
   row: { display: 'flex', gap: '1rem', flexWrap: 'wrap' },
   field: { display: 'flex', flexDirection: 'column', gap: '0.25rem', flex: 1 },
-  label: { fontSize: '0.8rem', fontWeight: '600', color: '#6b7280', marginTop: '0.4rem' },
+  label: { fontSize: '0.8rem', fontWeight: '600', color: colors.white, marginTop: '0.4rem' },
   input: {
     padding: '0.55rem 0.75rem', fontSize: '1rem',
-    border: '1px solid #d1d5db', borderRadius: '6px',
-    width: '100%', boxSizing: 'border-box',
+    border: `1px solid ${colors.border}`, borderRadius: '6px',
+    width: '100%', boxSizing: 'border-box', background: colors.bg, color: colors.white,
   },
   button: {
-    marginTop: '0.75rem', padding: '0.65rem 1.5rem', fontSize: '1rem',
-    background: '#4f46e5', color: '#fff', border: 'none',
+    marginTop: '0.75rem', padding: '0.65rem 1.5rem', fontSize: '1rem', fontWeight: '700',
+    background: colors.yellow, color: colors.black, border: 'none',
     borderRadius: '6px', cursor: 'pointer', alignSelf: 'flex-start',
   },
-  error:   { color: '#dc2626', fontSize: '0.875rem', margin: '0.25rem 0 0' },
-  success: { color: '#16a34a', fontSize: '0.875rem', margin: '0.25rem 0 0' },
-  muted:   { color: '#9ca3af', fontSize: '0.9rem', margin: 0 },
+  error:   { color: colors.yellow, fontWeight: '700', fontSize: '0.875rem', margin: '0.25rem 0 0' },
+  success: { color: colors.white, fontWeight: '700', fontSize: '0.875rem', margin: '0.25rem 0 0' },
+  muted:   { color: colors.gray, fontSize: '0.9rem', margin: 0 },
   medRow: {
     display: 'flex', flexDirection: 'column', gap: '0.65rem',
-    padding: '0.9rem 0', borderBottom: '1px solid #f3f4f6',
+    padding: '0.9rem 0', borderBottom: `1px solid ${colors.border}`,
   },
   medTop: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem',
   },
   medRight: { display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 },
-  medName:   { fontSize: '0.95rem', fontWeight: '600', color: '#111827' },
-  medDetail: { fontSize: '0.9rem', color: '#6b7280' },
+  medName:   { fontSize: '0.95rem', fontWeight: '600', color: colors.white },
+  medDetail: { fontSize: '0.9rem', color: colors.gray },
   statusBadge: {
     fontSize: '0.75rem', fontWeight: '700', textTransform: 'uppercase',
     letterSpacing: '0.05em', padding: '0.2rem 0.6rem', borderRadius: '999px',
   },
-  streak: { fontSize: '0.82rem', fontWeight: '700', color: '#d97706' },
-  notLogged: { fontSize: '0.78rem', color: '#9ca3af', fontStyle: 'italic' },
+  streak: { fontSize: '0.82rem', fontWeight: '700', color: colors.yellow },
+  notLogged: { fontSize: '0.78rem', color: colors.gray, fontStyle: 'italic' },
   timeWindow: {
-    fontSize: '0.78rem', color: '#6b7280',
-    background: '#f3f4f6', padding: '0.2rem 0.6rem', borderRadius: '999px',
+    fontSize: '0.78rem', color: colors.white,
+    background: 'transparent', border: `1px solid ${colors.border}`, padding: '0.2rem 0.6rem', borderRadius: '999px',
   },
   logBtns: { display: 'flex', gap: '0.5rem' },
   logBtn: {
@@ -421,8 +416,8 @@ const s = {
   },
   removeBtn: {
     padding: '0.1rem 0.4rem', fontSize: '1rem', lineHeight: 1,
-    color: '#9ca3af', background: 'transparent',
-    border: '1px solid #e5e7eb', borderRadius: '4px', cursor: 'pointer',
+    color: colors.white, background: 'transparent',
+    border: `1px solid ${colors.border}`, borderRadius: '4px', cursor: 'pointer',
     flexShrink: 0,
   },
 }

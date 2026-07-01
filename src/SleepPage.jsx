@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './supabase'
+import { colors } from './theme'
 
 // Same local-date convention as MedsPage: a night files under its wake-up date.
 function localDateStr(date = new Date()) {
@@ -248,44 +249,43 @@ export default function SleepPage() {
 const s = {
   wrapper: { display: 'flex', flexDirection: 'column', gap: '1.5rem' },
   section: {
-    background: '#fff', borderRadius: '10px', padding: '1.5rem',
-    boxShadow: '0 1px 6px rgba(0,0,0,0.08)',
+    background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: '10px', padding: '1.5rem',
   },
-  sectionTitle: { margin: '0 0 1rem', fontSize: '1rem', fontWeight: '600', color: '#374151' },
+  sectionTitle: { margin: '0 0 1rem', fontSize: '1rem', fontWeight: '600', color: colors.white },
   form: { display: 'flex', flexDirection: 'column', gap: '0.5rem' },
   row: { display: 'flex', gap: '1rem', flexWrap: 'wrap' },
   field: { display: 'flex', flexDirection: 'column', gap: '0.25rem', flex: 1 },
-  label: { fontSize: '0.8rem', fontWeight: '600', color: '#6b7280', marginTop: '0.4rem' },
+  label: { fontSize: '0.8rem', fontWeight: '600', color: colors.white, marginTop: '0.4rem' },
   input: {
     padding: '0.55rem 0.75rem', fontSize: '1rem',
-    border: '1px solid #d1d5db', borderRadius: '6px',
-    width: '100%', boxSizing: 'border-box',
+    border: `1px solid ${colors.border}`, borderRadius: '6px',
+    width: '100%', boxSizing: 'border-box', background: colors.bg, color: colors.white,
   },
   button: {
-    marginTop: '0.75rem', padding: '0.65rem 1.5rem', fontSize: '1rem',
-    background: '#4f46e5', color: '#fff', border: 'none',
+    marginTop: '0.75rem', padding: '0.65rem 1.5rem', fontSize: '1rem', fontWeight: '700',
+    background: colors.yellow, color: colors.black, border: 'none',
     borderRadius: '6px', cursor: 'pointer', alignSelf: 'flex-start',
   },
-  error:   { color: '#dc2626', fontSize: '0.875rem', margin: '0.25rem 0 0' },
-  success: { color: '#16a34a', fontSize: '0.875rem', margin: '0.25rem 0 0' },
-  muted:   { color: '#9ca3af', fontSize: '0.9rem', margin: 0 },
+  error:   { color: colors.yellow, fontWeight: '700', fontSize: '0.875rem', margin: '0.25rem 0 0' },
+  success: { color: colors.white, fontWeight: '700', fontSize: '0.875rem', margin: '0.25rem 0 0' },
+  muted:   { color: colors.gray, fontSize: '0.9rem', margin: 0 },
   stats: {
     display: 'flex', gap: '2rem', flexWrap: 'wrap',
-    padding: '0 0 1rem', marginBottom: '1rem', borderBottom: '1px solid #f3f4f6',
+    padding: '0 0 1rem', marginBottom: '1rem', borderBottom: `1px solid ${colors.border}`,
   },
   statBlock: { display: 'flex', flexDirection: 'column', gap: '0.15rem' },
-  statLabel: { fontSize: '0.75rem', color: '#9ca3af' },
-  statValue: { fontSize: '1.05rem', fontWeight: '700', color: '#111827' },
+  statLabel: { fontSize: '0.75rem', color: colors.gray },
+  statValue: { fontSize: '1.05rem', fontWeight: '700', color: colors.white },
   nightRow: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem',
-    padding: '0.65rem 0', borderBottom: '1px solid #f3f4f6',
+    padding: '0.65rem 0', borderBottom: `1px solid ${colors.border}`,
   },
-  nightDate:     { fontSize: '0.9rem', fontWeight: '600', color: '#111827', flex: 1 },
-  nightTimes:    { fontSize: '0.85rem', color: '#6b7280', flex: 1 },
+  nightDate:     { fontSize: '0.9rem', fontWeight: '600', color: colors.white, flex: 1 },
+  nightTimes:    { fontSize: '0.85rem', color: colors.gray, flex: 1 },
   wakeupsTag: {
-    fontSize: '0.75rem', color: '#9ca3af',
-    background: '#f3f4f6', padding: '0.15rem 0.5rem', borderRadius: '999px',
+    fontSize: '0.75rem', color: colors.white,
+    background: 'transparent', border: `1px solid ${colors.border}`, padding: '0.15rem 0.5rem', borderRadius: '999px',
     flexShrink: 0,
   },
-  nightDuration: { fontSize: '0.85rem', fontWeight: '700', color: '#4f46e5', flexShrink: 0 },
+  nightDuration: { fontSize: '0.85rem', fontWeight: '700', color: colors.black, background: colors.yellow, padding: '0.15rem 0.5rem', borderRadius: '999px', flexShrink: 0 },
 }
