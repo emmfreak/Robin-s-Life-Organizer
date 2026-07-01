@@ -3,23 +3,116 @@ import { supabase } from './supabase'
 
 const statusStyle = {
   taken:  { background: '#f0fdf4', color: '#16a34a', label: 'Taken' },
-  skipped:{ background: '#fef2f2', color: '#dc2626', label: 'Skipped' },
   late:   { background: '#fffbeb', color: '#d97706', label: 'Late' },
+  missed: { background: '#f3f4f6', color: '#9ca3af', label: 'Missed' },
+  skipped:{ background: '#fef2f2', color: '#dc2626', label: 'Skipped' },
 }
 
-// Counts consecutive "taken" days ending today (or yesterday if today isn't taken yet).
-// dates: array of YYYY-MM-DD strings, any order.
+const btnColors = {
+  taken:   { color: '#16a34a', border: '#bbf7d0', activeBg: '#f0fdf4' },
+  skipped: { color: '#dc2626', border: '#fecaca', activeBg: '#fef2f2' },
+}
+
+// Precise moments are stored UTC (taken_at).
+// The day a dose belongs to is always the local calendar day via localDateStr.
+function localDateStr(date = new Date()) {
+  return date.toLocaleDateString('en-CA') // YYYY-MM-DD in local time
+}
+
+
+// Formats a Postgres TIME string ("08:00:00") into "8:00 AM".
+function fmtTime(timeStr) {
+  const [h, m] = timeStr.split(':').map(Number)
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  const hour = h % 12 || 12
+  const mins = m === 0 ? '' : `:${String(m).padStart(2, '0')}`
+  return `${hour}${mins} ${ampm}`
+}
+
+// Returns a human-readable window label for the med row pill.
+// window_start is stored and displayed but not yet used in status logic (intentional — see Fix 4 note).
+function formatWindowLabel(med) {
+  if (med.window_start && med.window_end)
+    return `${fmtTime(med.window_start)} – ${fmtTime(med.window_end)}`
+  if (med.window_end)
+    return `until ${fmtTime(med.window_end)}`
+  return null
+}
+
+// Derives taken / late / missed by anchoring the window end to the closest
+// daily occurrence of that time — not blindly today's date.
+//
+// For a window_end of 19:30, there are three candidates:
+//   yesterday's 19:30, today's 19:30, tomorrow's 19:30.
+// We pick whichever is closest to takenAt, then measure the gap from that.
+//
+// Example: window_end=19:30, takenAt=01:54 AM next day
+//   → closest = yesterday's 19:30 (6h 24m away, not tonight's 17h 36m away)
+//   → 6h 24m > 1 hour → "missed"
+//
+// Outcomes:
+//   taken  — logged at or before the anchored window end
+//   late   — logged 0–60 min after the anchored window end (counts toward streak)
+//   missed — logged >60 min after the anchored window end (breaks streak)
+// Returns { status, doseDate } where doseDate is the local YYYY-MM-DD of the
+// dose's *anchored* day — which may differ from today if logging cross-midnight.
+//
+// Day-anchoring: for a window_end of 23:30, three candidate occurrences exist
+// (yesterday's, today's, tomorrow's). We pick the one closest to takenAt, then
+// measure the gap from that anchor — not blindly from today's 23:30.
+//
+// 11:30 PM window, logged at 12:15 AM Tuesday:
+//   closest anchor = Monday 23:30 (45 min away, not Tuesday 23:30 at 23h 15m)
+//   45 min ≤ 60 min → status='late', doseDate='Monday' ✓
+//
+// Outcomes:
+//   taken  — at or before the anchored window end
+//   late   — 0–60 min after (counts toward streak)
+//   missed — >60 min after (breaks streak)
+function deriveStatus(takenAt, med) {
+  const takenDate = new Date(takenAt)
+
+  if (!med.window_end) {
+    // No window defined — can't be late or missed.
+    return { status: 'taken', doseDate: localDateStr(takenDate) }
+  }
+
+  // window_start is intentionally unused here — it's stored and displayed but
+  // status logic only needs the end. An "too early" check can be added later.
+  const [endH, endM] = med.window_end.split(':').map(Number)
+
+  // Build three candidate window-end timestamps relative to takenAt's date.
+  const candidates = [-1, 0, 1].map(offset => {
+    const d = new Date(takenDate)
+    d.setDate(d.getDate() + offset)
+    d.setHours(endH, endM, 0, 0)
+    return d
+  })
+
+  // Anchor to whichever occurrence is closest to when the med was actually taken.
+  const anchoredEnd = candidates.reduce((best, c) =>
+    Math.abs(c - takenDate) < Math.abs(best - takenDate) ? c : best
+  )
+
+  // doseDate is the local calendar day of the anchor — this is what the log files under.
+  const doseDate = localDateStr(anchoredEnd)
+  const diffMs   = takenDate - anchoredEnd
+
+  if (diffMs <= 0)               return { status: 'taken',  doseDate }
+  if (diffMs <= 60 * 60 * 1000) return { status: 'late',   doseDate }
+  return                                { status: 'missed', doseDate }
+}
+
+// Counts consecutive days with status taken OR late, ending today (or yesterday).
 function computeStreak(dates) {
   if (dates.length === 0) return 0
   const dateSet = new Set(dates)
 
-  const todayD = new Date()
-  const todayStr = todayD.toLocaleDateString('en-CA')
-  const yesterdayD = new Date(todayD)
+  const todayStr     = localDateStr()
+  const yesterdayD   = new Date()
   yesterdayD.setDate(yesterdayD.getDate() - 1)
-  const yesterdayStr = yesterdayD.toLocaleDateString('en-CA')
+  const yesterdayStr = localDateStr(yesterdayD)
 
-  // Start counting from today if taken, otherwise from yesterday (preserves streak overnight).
   let cursor = dateSet.has(todayStr) ? todayStr : dateSet.has(yesterdayStr) ? yesterdayStr : null
   if (!cursor) return 0
 
@@ -28,23 +121,17 @@ function computeStreak(dates) {
     streak++
     const d = new Date(cursor + 'T00:00:00')
     d.setDate(d.getDate() - 1)
-    cursor = d.toLocaleDateString('en-CA')
+    cursor = localDateStr(d)
   }
   return streak
-}
-
-// Base and active colours for each log button.
-const btnColors = {
-  taken:   { color: '#16a34a', border: '#bbf7d0', activeBg: '#f0fdf4' },
-  skipped: { color: '#dc2626', border: '#fecaca', activeBg: '#fef2f2' },
-  late:    { color: '#d97706', border: '#fde68a', activeBg: '#fffbeb' },
 }
 
 export default function MedsPage() {
   // ── Add-med form ──
   const [name, setName] = useState('')
   const [dose, setDose] = useState('')
-  const [timeWindow, setTimeWindow] = useState('')
+  const [windowStart, setWindowStart] = useState('')
+  const [windowEnd, setWindowEnd] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(false)
@@ -53,10 +140,11 @@ export default function MedsPage() {
   const [meds, setMeds] = useState([])
   const [loadingMeds, setLoadingMeds] = useState(true)
   const [logsToday, setLogsToday] = useState({})
-  const [loggingId, setLoggingId] = useState(null) // med.id currently being saved
-  const [streaks, setStreaks] = useState({})         // med.id → streak count
+  const [loggingId, setLoggingId] = useState(null)
+  const [removingId, setRemovingId] = useState(null)
+  const [streaks, setStreaks] = useState({})
 
-  const today = new Date().toLocaleDateString('en-CA') // YYYY-MM-DD
+  const today = localDateStr()
 
   async function loadMeds() {
     const { data, error } = await supabase
@@ -65,13 +153,12 @@ export default function MedsPage() {
     setLoadingMeds(false)
   }
 
-  // One query fetches every taken log for all meds — no per-med queries.
-  // We group by med_id client-side, then run computeStreak on each group.
   async function loadStreaks() {
+    // Count taken AND late — both mean you actually took the med.
     const { data, error } = await supabase
       .from('med_logs')
       .select('med_id, date')
-      .eq('status', 'taken')
+      .in('status', ['taken', 'late'])
 
     if (!error) {
       const byMed = {}
@@ -101,25 +188,36 @@ export default function MedsPage() {
     e.preventDefault()
     setError(null); setSuccess(false); setSubmitting(true)
     const { error } = await supabase
-      .from('meds').insert({ name, dose, time_window: timeWindow, active: true })
+      .from('meds').insert({ name, dose, window_start: windowStart || null, window_end: windowEnd || null, active: true })
     if (error) { setError(error.message) }
-    else { setName(''); setDose(''); setTimeWindow(''); setSuccess(true); loadMeds() }
+    else { setName(''); setDose(''); setWindowStart(''); setWindowEnd(''); setSuccess(true); loadMeds() }
     setSubmitting(false)
   }
 
-  // Insert or update today's log for this med.
-  // If a row already exists (logsToday has it), update it — avoids duplicates.
-  // taken_at is only set when the status is 'taken'; otherwise cleared.
-  async function handleLog(med, status) {
+  async function handleLog(med, action) {
     setLoggingId(med.id)
 
-    const existing = logsToday[med.id]
-    const payload = {
-      med_id: med.id,
-      date: today,
-      status,
-      taken_at: status === 'taken' ? new Date().toISOString() : null,
+    let payload, doseDate
+
+    if (action === 'skipped') {
+      // Skipped is a deliberate same-day action — no timestamp to anchor from.
+      doseDate = today
+      payload = { med_id: med.id, date: doseDate, status: 'skipped', taken_at: null }
+    } else {
+      const takenAt = new Date().toISOString()
+      const derived = deriveStatus(takenAt, med)
+      doseDate = derived.doseDate   // may be yesterday if logging cross-midnight
+      payload  = { med_id: med.id, date: doseDate, status: derived.status, taken_at: takenAt }
     }
+
+    // Query by the dose's actual date, not the logsToday cache (which only covers
+    // today and would miss a cross-midnight case, causing a spurious INSERT).
+    const { data: existing } = await supabase
+      .from('med_logs')
+      .select('id')
+      .eq('med_id', med.id)
+      .eq('date', doseDate)
+      .maybeSingle()
 
     if (existing) {
       await supabase.from('med_logs').update(payload).eq('id', existing.id)
@@ -128,8 +226,15 @@ export default function MedsPage() {
     }
 
     await loadLogsToday()
-    await loadStreaks() // recompute after every log so the number updates live
+    await loadStreaks()
     setLoggingId(null)
+  }
+
+  async function handleRemove(med) {
+    setRemovingId(med.id)
+    await supabase.from('meds').update({ active: false }).eq('id', med.id)
+    await loadMeds()
+    setRemovingId(null)
   }
 
   return (
@@ -152,9 +257,14 @@ export default function MedsPage() {
                   placeholder="e.g. 50mg" style={s.input} />
               </div>
               <div style={s.field}>
-                <label style={s.label}>Time window</label>
-                <input type="text" value={timeWindow} onChange={e => setTimeWindow(e.target.value)}
-                  placeholder="e.g. 8–9am" style={s.input} />
+                <label style={s.label}>Window start</label>
+                <input type="time" value={windowStart} onChange={e => setWindowStart(e.target.value)}
+                  style={s.input} />
+              </div>
+              <div style={s.field}>
+                <label style={s.label}>Window end</label>
+                <input type="time" value={windowEnd} onChange={e => setWindowEnd(e.target.value)}
+                  style={s.input} />
               </div>
             </div>
             {error && <p style={s.error}>{error}</p>}
@@ -175,24 +285,25 @@ export default function MedsPage() {
           )}
 
           {meds.map(med => {
-            const log = logsToday[med.id]
-            const st = log ? statusStyle[log.status] : null
+            const log      = logsToday[med.id]
+            const st       = log ? statusStyle[log.status] : null
             const isLogging = loggingId === med.id
-            const streak = streaks[med.id] || 0
+            const streak   = streaks[med.id] || 0
+            // Taken button lights up whether the derived status was 'taken' or 'late' —
+            // both mean the user pressed Taken.
+            const takenActive   = log?.status === 'taken' || log?.status === 'late' || log?.status === 'missed'
+            const skippedActive = log?.status === 'skipped'
 
             return (
               <div key={med.id} style={s.medRow}>
 
-                {/* Top line: name + status */}
                 <div style={s.medTop}>
                   <div>
                     <span style={s.medName}>{med.name}</span>
                     {med.dose && <span style={s.medDetail}> · {med.dose}</span>}
                   </div>
                   <div style={s.medRight}>
-                    {streak > 0 && (
-                      <span style={s.streak}>🔥 {streak}</span>
-                    )}
+                    {streak > 0 && <span style={s.streak}>🔥 {streak}</span>}
                     {st ? (
                       <span style={{ ...s.statusBadge, background: st.background, color: st.color }}>
                         {st.label}
@@ -200,33 +311,49 @@ export default function MedsPage() {
                     ) : (
                       <span style={s.notLogged}>not logged yet</span>
                     )}
-                    {med.time_window && <span style={s.timeWindow}>{med.time_window}</span>}
+                    {formatWindowLabel(med) && (
+                      <span style={s.timeWindow}>{formatWindowLabel(med)}</span>
+                    )}
+                    <button
+                      onClick={() => handleRemove(med)}
+                      disabled={removingId === med.id}
+                      style={s.removeBtn}
+                      title="Remove medication"
+                    >
+                      ×
+                    </button>
                   </div>
                 </div>
 
-                {/* Bottom line: log buttons */}
                 <div style={s.logBtns}>
-                  {['taken', 'skipped', 'late'].map(status => {
-                    const c = btnColors[status]
-                    const isActive = log?.status === status
-                    return (
-                      <button
-                        key={status}
-                        onClick={() => handleLog(med, status)}
-                        disabled={isLogging}
-                        style={{
-                          ...s.logBtn,
-                          color: c.color,
-                          borderColor: c.border,
-                          background: isActive ? c.activeBg : '#fff',
-                          fontWeight: isActive ? '700' : '500',
-                          opacity: isLogging ? 0.5 : 1,
-                        }}
-                      >
-                        {status.charAt(0).toUpperCase() + status.slice(1)}
-                      </button>
-                    )
-                  })}
+                  <button
+                    onClick={() => handleLog(med, 'taken')}
+                    disabled={isLogging}
+                    style={{
+                      ...s.logBtn,
+                      color: btnColors.taken.color,
+                      borderColor: btnColors.taken.border,
+                      background: takenActive ? btnColors.taken.activeBg : '#fff',
+                      fontWeight: takenActive ? '700' : '500',
+                      opacity: isLogging ? 0.5 : 1,
+                    }}
+                  >
+                    Taken
+                  </button>
+                  <button
+                    onClick={() => handleLog(med, 'skipped')}
+                    disabled={isLogging}
+                    style={{
+                      ...s.logBtn,
+                      color: btnColors.skipped.color,
+                      borderColor: btnColors.skipped.border,
+                      background: skippedActive ? btnColors.skipped.activeBg : '#fff',
+                      fontWeight: skippedActive ? '700' : '500',
+                      opacity: isLogging ? 0.5 : 1,
+                    }}
+                  >
+                    Skipped
+                  </button>
                 </div>
 
               </div>
@@ -251,7 +378,7 @@ const s = {
   },
   sectionTitle: { margin: '0 0 1rem', fontSize: '1rem', fontWeight: '600', color: '#374151' },
   form: { display: 'flex', flexDirection: 'column', gap: '0.5rem' },
-  row: { display: 'flex', gap: '1rem' },
+  row: { display: 'flex', gap: '1rem', flexWrap: 'wrap' },
   field: { display: 'flex', flexDirection: 'column', gap: '0.25rem', flex: 1 },
   label: { fontSize: '0.8rem', fontWeight: '600', color: '#6b7280', marginTop: '0.4rem' },
   input: {
@@ -267,7 +394,6 @@ const s = {
   error:   { color: '#dc2626', fontSize: '0.875rem', margin: '0.25rem 0 0' },
   success: { color: '#16a34a', fontSize: '0.875rem', margin: '0.25rem 0 0' },
   muted:   { color: '#9ca3af', fontSize: '0.9rem', margin: 0 },
-
   medRow: {
     display: 'flex', flexDirection: 'column', gap: '0.65rem',
     padding: '0.9rem 0', borderBottom: '1px solid #f3f4f6',
@@ -276,17 +402,13 @@ const s = {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem',
   },
   medRight: { display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 },
-  medName:  { fontSize: '0.95rem', fontWeight: '600', color: '#111827' },
-  medDetail:{ fontSize: '0.9rem', color: '#6b7280' },
+  medName:   { fontSize: '0.95rem', fontWeight: '600', color: '#111827' },
+  medDetail: { fontSize: '0.9rem', color: '#6b7280' },
   statusBadge: {
     fontSize: '0.75rem', fontWeight: '700', textTransform: 'uppercase',
     letterSpacing: '0.05em', padding: '0.2rem 0.6rem', borderRadius: '999px',
   },
-  streak: {
-    fontSize: '0.82rem',
-    fontWeight: '700',
-    color: '#d97706',
-  },
+  streak: { fontSize: '0.82rem', fontWeight: '700', color: '#d97706' },
   notLogged: { fontSize: '0.78rem', color: '#9ca3af', fontStyle: 'italic' },
   timeWindow: {
     fontSize: '0.78rem', color: '#6b7280',
@@ -295,7 +417,12 @@ const s = {
   logBtns: { display: 'flex', gap: '0.5rem' },
   logBtn: {
     padding: '0.3rem 0.85rem', fontSize: '0.82rem',
-    border: '1px solid', borderRadius: '6px',
-    cursor: 'pointer', transition: 'opacity 0.1s',
+    border: '1px solid', borderRadius: '6px', cursor: 'pointer',
+  },
+  removeBtn: {
+    padding: '0.1rem 0.4rem', fontSize: '1rem', lineHeight: 1,
+    color: '#9ca3af', background: 'transparent',
+    border: '1px solid #e5e7eb', borderRadius: '4px', cursor: 'pointer',
+    flexShrink: 0,
   },
 }
